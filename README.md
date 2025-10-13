@@ -11,10 +11,10 @@ HRZone Pro is a wireless heart rate display system that bridges your smartwatch'
 
 ### Real-World Action Shots
 
-![Cycling with HRZone Pro](images/bike-mounted-display.jpg)
+![Cycling with HRZone Pro](images/Esp.png)
 *HRZone Pro display unit showing real-time heart rate in the "Normal" zone with scrolling graph - perfect for any activity*
 
-![Wear OS Companion App](images/smartwatch-app.jpg)
+![Wear OS Companion App](images/Watch.png)
 *Wear OS companion app seamlessly connected to ESP32 display unit*
 
 ---
