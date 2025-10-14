@@ -1,219 +1,359 @@
-package com.example.heartratezone.presentation
+package com.example.ble00001
 
 import android.Manifest
-import android.content.ComponentName
+import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import android.util.Log
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
+import android.widget.Button
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import androidx.wear.compose.material.*
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 
-class MainActivity : ComponentActivity() {
+@Suppress("MissingPermission") // Permissions are checked via hasRequiredBluetoothPermissions()
+class MainActivity : AppCompatActivity() {
 
-    // Service binding
-    private var heartRateService: HeartRateService? = null
-    private var serviceBound = false
+    // UI components
+    private lateinit var scanButton: Button
+    private lateinit var statusText: TextView
+    private lateinit var scanResultsRecyclerView: RecyclerView
 
-    // State
-    private var isConnected = mutableStateOf(false)
-    private var currentHeartRate = mutableStateOf(0)
-    private var connectionStatus = mutableStateOf("Not Connected")
+    // BLE components
+    private val bluetoothAdapter: BluetoothAdapter by lazy {
+        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        bluetoothManager.adapter
+    }
 
-    // Permission launcher
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.values.all { it }
-        if (allGranted) {
-            Log.d(TAG, "All permissions granted")
-            connectionStatus.value = "Permissions granted"
-            startHeartRateService()
-        } else {
-            Log.e(TAG, "Some permissions denied")
-            connectionStatus.value = "Permissions denied"
+    private val bleScanner: BluetoothLeScanner by lazy {
+        bluetoothAdapter.bluetoothLeScanner
+    }
+
+    private val scanSettings = ScanSettings.Builder()
+        .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+        .build()
+
+    // Connection Manager
+    private val connectionManager: BluetoothConnectionManager by lazy {
+        BluetoothConnectionManager.getInstance(this).apply {
+            onConnectionStateChange = { connected, error ->
+                runOnUiThread {
+                    if (connected) {
+                        statusText.text = "Connected! Discovering services..."
+                    } else {
+                        statusText.text = error ?: "Disconnected"
+                    }
+                }
+            }
+
+            onServicesDiscovered = { services ->
+                runOnUiThread {
+                    statusText.text = "Connected! Found ${services.size} services"
+                    Log.i(TAG, "Available services:")
+                    services.forEach { service ->
+                        Log.i(TAG, "Service: ${service.uuid} (${service.characteristics.size} characteristics)")
+                    }
+
+                    // Launch control activity after successful service discovery
+                    launchControlActivity()
+                }
+            }
+
+            onCharacteristicChanged = { characteristic, value ->
+                runOnUiThread {
+                    Log.i(TAG, "Notification from ${characteristic.uuid}: ${value.toHexString()}")
+                }
+            }
         }
     }
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            val binder = service as HeartRateService.LocalBinder
-            heartRateService = binder.getService()
-            serviceBound = true
+    private var connectedDeviceName: String? = null
+    private var connectedDeviceAddress: String? = null
 
-            // Set up callbacks
-            heartRateService?.onHeartRateChanged = { bpm ->
-                currentHeartRate.value = bpm
+    // Scan state management
+    private var isScanning = false
+        set(value) {
+            field = value
+            runOnUiThread {
+                scanButton.text = if (value) "Stop Scan" else "Start Scan"
+                statusText.text = if (value) "Scanning for BLE devices..." else "Ready to scan"
             }
-
-            heartRateService?.onConnectionStateChanged = { connected, status ->
-                isConnected.value = connected
-                connectionStatus.value = status
-            }
-
-            Log.d(TAG, "Service connected")
         }
 
-        override fun onServiceDisconnected(name: ComponentName?) {
-            serviceBound = false
-            heartRateService = null
-            Log.d(TAG, "Service disconnected")
+    // Scan results
+    private val scanResults = mutableListOf<ScanResult>()
+    private val scanResultAdapter: ScanResultAdapter by lazy {
+        ScanResultAdapter(scanResults) { result ->
+            // Handle device selection (connect)
+            if (isScanning) {
+                stopBleScan()
+            }
+            connectToDevice(result)
+        }
+    }
+
+    // Permission handling
+    private val bluetoothEnablingResult = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            // Bluetooth is enabled, good to go
+            statusText.text = "Bluetooth enabled - ready to scan"
+        } else {
+            // User dismissed or denied Bluetooth prompt
+            promptEnableBluetooth()
         }
     }
 
     companion object {
-        private const val TAG = "MainActivity"
+        private const val PERMISSION_REQUEST_CODE = 1
+        private const val TAG = "BLE00001"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-        // Check and request permissions
-        if (!hasAllPermissions()) {
-            requestPermissions()
-        } else {
-            startHeartRateService()
+        // Initialize views
+        scanButton = findViewById(R.id.scan_button)
+        statusText = findViewById(R.id.status_text)
+        scanResultsRecyclerView = findViewById(R.id.scan_results_recycler_view)
+
+        setupRecyclerView()
+        setupClickListeners()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!bluetoothAdapter.isEnabled) {
+            promptEnableBluetooth()
+        }
+    }
+
+    private fun setupRecyclerView() {
+        scanResultsRecyclerView.apply {
+            adapter = scanResultAdapter
+            layoutManager = LinearLayoutManager(this@MainActivity)
+        }
+    }
+
+    private fun setupClickListeners() {
+        scanButton.setOnClickListener {
+            if (isScanning) {
+                stopBleScan()
+            } else {
+                startBleScan()
+            }
+        }
+    }
+
+    // BLE Scanning Functions
+    private fun startBleScan() {
+        if (!hasRequiredBluetoothPermissions()) {
+            requestRelevantRuntimePermissions()
+            return
         }
 
-        setContent {
-            WearApp(
-                heartRate = currentHeartRate.value,
-                isConnected = isConnected.value,
-                status = connectionStatus.value,
-                onScanClick = {
-                    heartRateService?.startBleScan()
-                },
-                onDisconnectClick = {
-                    heartRateService?.disconnect()
+        scanResults.clear()
+        scanResultAdapter.notifyDataSetChanged()
+        bleScanner.startScan(null, scanSettings, scanCallback)
+        isScanning = true
+    }
+
+    private fun stopBleScan() {
+        if (!hasRequiredBluetoothPermissions()) {
+            return
+        }
+        bleScanner.stopScan(scanCallback)
+        isScanning = false
+    }
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            if (!hasRequiredBluetoothPermissions()) {
+                return
+            }
+
+            val indexQuery = scanResults.indexOfFirst { it.device.address == result.device.address }
+            if (indexQuery != -1) {
+                // Update existing scan result
+                scanResults[indexQuery] = result
+                scanResultAdapter.notifyItemChanged(indexQuery)
+            } else {
+                // Add new scan result
+                val deviceName = if (hasRequiredBluetoothPermissions()) {
+                    result.device.name ?: "Unnamed"
+                } else {
+                    "Unknown"
                 }
-            )
+                Log.i(TAG, "Found BLE device! Name: $deviceName, address: ${result.device.address}")
+                scanResults.add(result)
+                scanResultAdapter.notifyItemInserted(scanResults.size - 1)
+            }
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            Log.e(TAG, "BLE scan failed with error code: $errorCode")
+            isScanning = false
+            statusText.text = "Scan failed with error: $errorCode"
         }
     }
 
-    private fun startHeartRateService() {
-        val serviceIntent = Intent(this, HeartRateService::class.java)
-        startService(serviceIntent)
-        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+    // Permission Management
+    private fun requestRelevantRuntimePermissions() {
+        if (hasRequiredBluetoothPermissions()) {
+            return
+        }
+        when {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S -> {
+                requestLocationPermission()
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                requestBluetoothPermissions()
+            }
+        }
     }
 
-    private fun hasAllPermissions(): Boolean {
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            listOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BODY_SENSORS,
-                Manifest.permission.ACCESS_FINE_LOCATION
+    private fun requestLocationPermission() = runOnUiThread {
+        AlertDialog.Builder(this)
+            .setTitle("Location permission required")
+            .setMessage(
+                "Starting from Android M (6.0), the system requires apps to be granted " +
+                        "location access in order to scan for BLE devices."
             )
+            .setCancelable(false)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                    PERMISSION_REQUEST_CODE
+                )
+            }
+            .show()
+    }
+
+    private fun requestBluetoothPermissions() = runOnUiThread {
+        AlertDialog.Builder(this)
+            .setTitle("Bluetooth permission required")
+            .setMessage(
+                "Starting from Android 12, the system requires apps to be granted " +
+                        "Bluetooth access in order to scan for and connect to BLE devices."
+            )
+            .setCancelable(false)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(
+                        Manifest.permission.BLUETOOTH_SCAN,
+                        Manifest.permission.BLUETOOTH_CONNECT
+                    ),
+                    PERMISSION_REQUEST_CODE
+                )
+            }
+            .show()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != PERMISSION_REQUEST_CODE) return
+
+        val containsPermanentDenial = permissions.zip(grantResults.toTypedArray()).any {
+            it.second == PackageManager.PERMISSION_DENIED &&
+                    !ActivityCompat.shouldShowRequestPermissionRationale(this, it.first)
+        }
+        val containsDenial = grantResults.any { it == PackageManager.PERMISSION_DENIED }
+        val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+
+        when {
+            containsPermanentDenial -> {
+                statusText.text = "Permissions permanently denied. Please enable in Settings."
+                AlertDialog.Builder(this)
+                    .setTitle("Permissions Required")
+                    .setMessage("BLE functionality requires permissions. Please enable them in App Settings.")
+                    .setPositiveButton("OK") { _, _ -> }
+                    .show()
+            }
+            containsDenial -> {
+                requestRelevantRuntimePermissions()
+            }
+            allGranted && hasRequiredBluetoothPermissions() -> {
+                statusText.text = "Permissions granted - ready to scan"
+                startBleScan()
+            }
+            else -> {
+                // Unexpected scenario
+                recreate()
+            }
+        }
+    }
+
+    // Bluetooth Enable Management
+    private fun promptEnableBluetooth() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            !hasPermission(Manifest.permission.BLUETOOTH_CONNECT)
+        ) {
+            // Insufficient permission to prompt for Bluetooth enabling
+            return
+        }
+
+        if (!bluetoothAdapter.isEnabled) {
+            Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE).apply {
+                bluetoothEnablingResult.launch(this)
+            }
+        }
+    }
+
+    // Device Connection
+    private fun connectToDevice(scanResult: ScanResult) {
+        if (!hasRequiredBluetoothPermissions()) {
+            statusText.text = "Missing Bluetooth permissions"
+            return
+        }
+
+        val device = scanResult.device
+        val deviceName = if (hasRequiredBluetoothPermissions()) {
+            device.name ?: "Unnamed"
         } else {
-            listOf(
-                Manifest.permission.BLUETOOTH,
-                Manifest.permission.BLUETOOTH_ADMIN,
-                Manifest.permission.BODY_SENSORS,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            )
+            "Unknown"
         }
 
-        return permissions.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
+        // Store device info for control activity
+        connectedDeviceName = deviceName
+        connectedDeviceAddress = device.address
+
+        Log.i(TAG, "Attempting to connect to $deviceName (${device.address})")
+        statusText.text = "Connecting to ${deviceName}..."
+
+        // Connect using the connection manager
+        connectionManager.connect(device)
     }
 
-    private fun requestPermissions() {
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BODY_SENSORS,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            )
-        } else {
-            arrayOf(
-                Manifest.permission.BLUETOOTH,
-                Manifest.permission.BLUETOOTH_ADMIN,
-                Manifest.permission.BODY_SENSORS,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            )
+    private fun launchControlActivity() {
+        val intent = Intent(this, BleControlActivity::class.java).apply {
+            putExtra(BleControlActivity.EXTRA_DEVICE_NAME, connectedDeviceName)
+            putExtra(BleControlActivity.EXTRA_DEVICE_ADDRESS, connectedDeviceAddress)
         }
-
-        permissionLauncher.launch(permissions)
+        startActivity(intent)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (serviceBound) {
-            unbindService(serviceConnection)
-            serviceBound = false
-        }
-    }
-}
-
-@Composable
-fun WearApp(
-    heartRate: Int,
-    isConnected: Boolean,
-    status: String,
-    onScanClick: () -> Unit,
-    onDisconnectClick: () -> Unit
-) {
-    MaterialTheme {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colors.background),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Heart Icon
-                Icon(
-                    imageVector = if (isConnected) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Heart",
-                    tint = if (heartRate > 0) Color.Red else Color.Gray,
-                    modifier = Modifier.size(40.dp)
-                )
-
-                // Heart Rate Display
-                Text(
-                    text = if (heartRate > 0) "$heartRate BPM" else "-- BPM",
-                    style = MaterialTheme.typography.display1,
-                    textAlign = TextAlign.Center
-                )
-
-                // Connection Status
-                Text(
-                    text = status,
-                    style = MaterialTheme.typography.body2,
-                    color = if (isConnected) Color.Green else Color.White
-                )
-
-                // Action Button
-                CompactChip(
-                    onClick = if (isConnected) onDisconnectClick else onScanClick,
-                    label = {
-                        Text(if (isConnected) "Disconnect" else "Connect ESP32")
-                    }
-                )
-            }
-        }
+        connectionManager.close()
     }
 }

@@ -23,13 +23,14 @@ HRZone Pro is a wireless heart rate display system that bridges your smartwatch'
 
 ### 🎨 **Color-Coded Zone Indicators**
 Instantly know your training intensity without reading numbers:
-- 🔵 **Blue** - Low (< 60 BPM) - Recovery zone
+- 🔵 **Cyan** - Rest (< 60 BPM) - Recovery zone
 - 🟢 **Green** - Normal (60-100 BPM) - Base endurance
-- 🟡 **Yellow** - Elevated (100-140 BPM) - Threshold training  
-- 🔴 **Red** - High (> 140 BPM) - Maximum effort
+- 🟡 **Yellow** - Fat Burn (100-130 BPM) - Optimal fat burning
+- 🟠 **Orange** - Cardio (130-160 BPM) - Cardiovascular training
+- 🔴 **Red** - Peak (160+ BPM) - Maximum effort
 
 ### 📊 **Live Heart Rate Graph**
-Track your heart rate trends over the past 20 minutes with a scrolling graph display - perfect for interval training and recovery monitoring.
+Track your heart rate trends over the past 2 minutes with a real-time scrolling graph - perfect for interval training and recovery monitoring. Graph automatically scales and color-codes by zone.
 
 ### 📡 **Wireless BLE Connection**
 Reliable Bluetooth Low Energy connection between your Wear OS watch and the display unit - no cables, no hassle, just pure performance data.
@@ -38,10 +39,12 @@ Reliable Bluetooth Low Energy connection between your Wear OS watch and the disp
 Bright TFT display optimized for outdoor visibility - readable in direct sunlight and automatically adjusts for low-light conditions.
 
 ### 💪 **Built for Athletes**
-- Bright TFT display optimized for outdoor visibility
-- Vibration-resistant mounting for rough terrain
-- 10+ hour battery life on a single charge
-- Lightweight (< 100g) display unit
+- Bright 320x240 TFT display optimized for outdoor visibility
+- Large, smooth fonts for easy reading during intense workouts
+- Enhanced position marker on zone bar for quick zone identification
+- Vibration-resistant design
+- Built-in rechargeable battery with USB-C charging
+- Lightweight portable unit with protective case
 
 ---
 
@@ -63,19 +66,20 @@ Bright TFT display optimized for outdoor visibility - readable in direct sunligh
 - Bluetooth LE support
 
 ### Display Unit  
-- LILYGO TTGO T-Display ESP32 development board
+- M5Stack Core2 with built-in TFT display
 - USB-C power source (power bank or direct)
 
 ---
 
 ## 🛠️ Technical Specifications
 
-### Display Unit (ESP32)
-- **Screen**: 135x240 pixel color TFT
+### Display Unit (M5Stack Core2)
+- **Screen**: 320x240 pixel color TFT touchscreen
 - **Processor**: ESP32 dual-core
 - **Connectivity**: Bluetooth LE 4.2
 - **Update Rate**: Real-time (< 2 second latency)
-- **Power**: 5V USB-C, ~150mA consumption
+- **Power**: Built-in battery + USB-C charging
+- **Extras**: Built-in speaker, buttons for debug control
 
 ### Wear OS App
 - **Sensor Polling**: Continuous monitoring
@@ -87,19 +91,24 @@ Bright TFT display optimized for outdoor visibility - readable in direct sunligh
 
 ## 📦 What's Included
 
-- ESP32 TTGO T-Display firmware (`esp32_LILYGO_TTGO_HeartRateZone.ino`)
+- M5Stack Core2 firmware (`M5Stack_Ble_Heart_Rate.ino`)
 - Wear OS companion app (Kotlin source)
-- Mounting solutions guide
-- Quick start instructions
+- BLE communication protocol for real-time HR transmission
+- Color-coded heart rate zone visualization with 5 training zones
 
 ---
 
 ## 🎮 Getting Started
 
-1. **Flash the ESP32** - Upload the Arduino sketch to your TTGO T-Display
+1. **Flash the M5Stack** - Upload the Arduino sketch to your M5Stack Core2
 2. **Install Wear OS App** - Deploy the Kotlin app to your smartwatch
 3. **Pair Devices** - Launch app and tap "Connect ESP32"
 4. **Mount & Go** - Secure display where you need it and start training!
+
+**Debug Controls (M5Stack):**
+- **Button A**: Force BLE restart
+- **Button B**: Toggle debug info display
+- **Button C**: Reset statistics
 
 ---
 
